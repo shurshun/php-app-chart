@@ -1,0 +1,337 @@
+{{- if or .Values.nginx.enabled .Values.php.enabled }}
+{{- $fullName := include "php-app.fullname" . -}}
+apiVersion: apps/v1beta2
+kind: Deployment
+metadata:
+  name: {{ include "php-app.fullname" . }}
+  labels:
+    app.kubernetes.io/name: {{ include "php-app.name" . }}
+    helm.sh/chart: {{ include "php-app.chart" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "php-app.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "php-app.name" . }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+      {{- if .Values.podLabels }}
+{{ toYaml .Values.podLabels | indent 8}}
+      {{- end }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/nginx-configs.yaml") . | sha256sum }}
+      {{- if .Values.configs }}
+        checksum/app-config: {{ include (print $.Template.BasePath "/app-configs.yaml") . | sha256sum }}
+      {{- end }}
+      {{- if .Values.env.open }}
+        checksum/configmap: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+      {{- end }}
+      {{- if .Values.env.secret }}
+        checksum/secrets: {{ include (print $.Template.BasePath "/secrets.yaml") . | sha256sum }}
+      {{- end }}
+      {{- if and .Values.php.enabled (eq .Values.php.mode "php-fpm") }}
+        checksum/php-config: {{ include (print $.Template.BasePath "/php-configs.yaml") . | sha256sum }}
+      {{- end }}
+      {{- with .Values.podAnnotations }}
+{{ toYaml . | indent 8 }}
+      {{- end }}
+    spec:
+      volumes:
+      {{- if .Values.nginx.enabled }}
+        - name: nginx-config
+          configMap:
+            name: {{ $fullName }}-nginx
+      {{- end }}
+      {{- if .Values.configs }}
+        - name: app-configs
+          secret:
+            secretName: {{ $fullName }}-configs
+      {{- end }}
+      {{- with .Values.volumes }}
+{{ toYaml . | indent 8 }}
+      {{- end }}
+      {{- if .Values.persistence.enabled }}
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ .Values.persistence.existingClaim | default (include "php-app.fullname" .) }}
+      {{- end }}
+  {{- if .Values.initContainers }}
+      initContainers:
+    {{- range $idx, $cnt := .Values.initContainers }}
+        - name: {{ $cnt.name }}
+        {{- if $cnt.image }}
+          image: "{{ default $.Values.image.repository $cnt.image.repository }}:{{ default $.Values.image.tag $cnt.image.tag }}"
+          imagePullPolicy: {{ default $.Values.image.pullPolicy $cnt.image.PullPolicy }}
+        {{- else }}
+          image: "{{ $.Values.image.repository }}:{{ $.Values.image.tag }}"
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+        {{- end }}
+        {{- with $cnt.command }}
+          command:
+{{ toYaml . | indent 12 }}
+        {{- end }}
+        {{- with $cnt.args }}
+          args:
+{{ toYaml . | indent 12 }}
+        {{- end }}
+        {{- if or $.Values.env.secret $.Values.env.open }}
+          envFrom:
+          {{- if $.Values.env.secret }}
+            - secretRef:
+                name: {{ $fullName }}
+          {{- end }}
+          {{- if $.Values.env.open }}
+            - configMapRef:
+                name: {{ $fullName }}
+          {{- end }}
+        {{- end }}
+    {{- end }}
+        {{- if or $.Values.volumeMounts $.Values.persistence.enabled }}
+          volumeMounts:
+        {{- end }}
+        {{- with $.Values.volumeMounts }}
+{{ toYaml . | indent 12 }}
+        {{- end }}
+        {{- if $.Values.persistence.enabled }}
+            - name: data
+              mountPath: {{ $.Values.persistence.mountPath }}
+        {{- end }}
+  {{- end }}
+      containers:
+{{- if .Values.nginx.enabled }}
+        - name: nginx
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - docker-nginx-entrypoint
+        {{- with .Values.nginx.args }}
+          args:
+{{ toYaml . | indent 12 }}
+        {{- end }}
+          ports:
+          {{- range $name, $data := .Values.ports }}
+            - name: {{ $name }}
+              containerPort: {{ $data.port }}
+              protocol: {{ default "TCP" $data.protocol }}
+          {{- end }}
+{{- if .Values.metrics.enabled }}
+            - name: nginx-status
+              containerPort: 8080
+              protocol: TCP
+{{- end }}
+          livenessProbe:
+{{ toYaml .Values.livenessProbe | indent 12 }}
+          readinessProbe:
+{{ toYaml .Values.readinessProbe | indent 12 }}
+        {{- with .Values.env.raw }}
+          env:
+{{- range $key, $value := . }}
+            - name: {{ $key }}
+              value: {{ $value | toString | quote }}
+{{- end }}
+        {{- end }}
+        {{- if or .Values.env.secret .Values.env.open }}
+          envFrom:
+          {{- if .Values.env.secret }}
+            - secretRef:
+                name: {{ $fullName }}
+          {{- end }}
+          {{- if .Values.env.open }}
+            - configMapRef:
+                name: {{ $fullName }}
+          {{- end }}
+        {{- end }}
+          volumeMounts:
+            - name: nginx-config
+              mountPath: /etc/nginx/sites-enabled
+              readOnly: true
+          {{- range $idx, $cfg := .Values.configs }}
+            - name: app-configs
+              mountPath: {{ $cfg.path }}
+              subPath: {{ $cfg.name }}
+              readOnly: true
+          {{- end }}
+          {{- with .Values.volumeMounts }}
+{{ toYaml . | indent 12 }}
+          {{- end }}
+          {{- if .Values.persistence.enabled }}
+            - name: data
+              mountPath: {{ .Values.persistence.mountPath }}
+          {{- end }}
+{{- end }}
+{{- if .Values.php.enabled }}
+        - name: php
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - docker-php-entrypoint
+        {{- with .Values.php.args }}
+          args:
+{{ toYaml . | indent 12 }}
+        {{- end }}
+{{- if eq .Values.php.mode "php-fpm"}}
+          ports:
+            - name: php-fpm
+              containerPort: 9000
+              protocol: TCP
+          livenessProbe:
+            tcpSocket:
+              port: php-fpm
+            initialDelaySeconds: 10
+            timeoutSeconds: 5
+          readinessProbe:
+            tcpSocket:
+              port: php-fpm
+            initialDelaySeconds: 10
+            timeoutSeconds: 5
+{{- end }}
+        {{- with .Values.env.raw }}
+          env:
+{{- range $key, $value := . }}
+            - name: {{ $key }}
+              value: {{ $value | toString | quote }}
+{{- end }}
+        {{- end }}
+        {{- if or .Values.env.open .Values.env.secret (eq .Values.php.mode "php-fpm") }}
+          envFrom:
+          {{- if eq .Values.php.mode "php-fpm" }}
+            - configMapRef:
+                name: {{ $fullName }}-php
+          {{- end }}
+          {{- if .Values.env.secret }}
+            - secretRef:
+                name: {{ $fullName }}
+          {{- end }}
+          {{- if .Values.env.open }}
+            - configMapRef:
+                name: {{ $fullName }}
+          {{- end }}
+        {{- if or .Values.configs .Values.volumeMounts .Values.persistence.enabled }}
+          volumeMounts:
+          {{- range $idx, $cfg := .Values.configs }}
+            - name: app-configs
+              mountPath: {{ $cfg.path }}
+              subPath: {{ $cfg.name }}
+              readOnly: true
+          {{- end }}
+        {{- end }}
+      {{- with .Values.volumeMounts }}
+{{ toYaml . | indent 12 }}
+      {{- end }}
+          {{- if .Values.persistence.enabled }}
+            - name: data
+              mountPath: {{ .Values.persistence.mountPath }}
+          {{- end }}
+        {{- end }}
+          resources:
+{{ toYaml .Values.resources | indent 12 }}
+{{- end }}
+    {{- range $idx, $cnt := .Values.extraContainers }}
+        - name: {{ $cnt.name }}
+        {{- if $cnt.image }}
+          image: "{{ $cnt.image.repository }}:{{ $cnt.image.tag }}"
+          imagePullPolicy: {{ default $.Values.image.pullPolicy $cnt.image.PullPolicy }}
+        {{- else }}
+          image: "{{ $.Values.image.repository }}:{{ $.Values.image.tag }}"
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+        {{- end }}
+        {{- with $cnt.command }}
+          command:
+{{ toYaml . | indent 12 }}
+        {{- end }}
+        {{- with $cnt.args }}
+          args:
+{{ toYaml . | indent 12 }}
+        {{- end }}
+        {{- if $cnt.ports }}
+          ports:
+          {{- range $idx, $port := $cnt.ports }}
+            - name: {{ $port.name }}
+              containerPort: {{ $port.port }}
+              protocol: {{ default "TCP" $port.protocol }}
+          {{- end }}
+        {{- end }}
+        {{- with $cnt.livenessProbe }}
+          livenessProbe:
+{{ toYaml . | indent 12 }}
+        {{- end }}
+        {{- with $cnt.readinessProbe }}
+          readinessProbe:
+{{ toYaml . | indent 12 }}
+        {{- end }}
+        {{- if $cnt.env }}
+          env:
+{{ toYaml $cnt.env | indent 12 }}
+        {{- else }}
+        {{- if or $.Values.env.secret $.Values.env.open }}
+          envFrom:
+          {{- if $.Values.env.secret }}
+            - secretRef:
+                name: {{ $fullName }}
+          {{- end }}
+          {{- if $.Values.env.open }}
+            - configMapRef:
+                name: {{ $fullName }}
+          {{- end }}
+        {{- end }}
+        {{- end }}
+        {{- if or $.Values.configs $.Values.volumeMounts }}
+          volumeMounts:
+          {{- range $idx, $cfg := $.Values.configs }}
+            - name: app-configs
+              mountPath: {{ $cfg.path }}
+              subPath: {{ $cfg.name }}
+              readOnly: true
+          {{- end }}
+          {{- with $.Values.volumeMounts }}
+{{ toYaml . | indent 12 }}
+          {{- end }}
+          {{- if $.Values.persistence.enabled }}
+            - name: data
+              mountPath: {{ $.Values.persistence.mountPath }}
+          {{- end }}
+        {{- end }}
+        {{- with $cnt.resources }}
+          resources:
+{{ toYaml . | indent 12 }}
+        {{- end }}
+    {{- end }}
+{{- if .Values.metrics.enabled }}
+        - name: nginx-exporter
+          image: "{{ .Values.metrics.nginx.image.repository }}:{{ .Values.metrics.nginx.image.tag }}"
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: nginx-metrics
+              containerPort: 9113
+              protocol: TCP
+        - name: php-fpm-exporter
+          image: "{{ .Values.metrics.php.image.repository }}:{{ .Values.metrics.php.image.tag }}"
+          imagePullPolicy: Always
+          args:
+            - --addr=0.0.0.0:9112
+            - --fastcgi=tcp://127.0.0.1:9000/status
+          ports:
+            - name: php-metrics
+              containerPort: 9112
+              protocol: TCP
+{{- end }}
+    {{- with .Values.nodeSelector }}
+      nodeSelector:
+{{ toYaml . | indent 8 }}
+    {{- end }}
+    {{- with .Values.affinity }}
+      affinity:
+{{ toYaml . | indent 8 }}
+    {{- end }}
+    {{- with .Values.tolerations }}
+      tolerations:
+{{ toYaml . | indent 8 }}
+    {{- end }}
+      serviceAccountName: {{ include "php-app.service-account" . }}
+
+{{- end }}

@@ -1,0 +1,42 @@
+image: shurshun/deploy-image
+
+variables:
+  HELM_REPO_URL_DEV: https://charts.k8s-dev.ru
+  HELM_REPO_URL_PROD: https://charts.k8s-prod.ru
+
+stages:
+  - test
+  - upload
+
+test:
+  stage: test
+  tags:
+    - k8s-dev
+  script:
+    - helm lint .
+
+.upload:
+  stage: upload
+  tags:
+    - k8s-dev
+  script:
+    - helm push . ${HELM_REPO_URL}
+
+upload to dev:
+  extends: .upload
+  only:
+    - develop
+  variables:
+    HELM_REPO_USERNAME: ${HELM_REPO_USERNAME_DEV}
+    HELM_REPO_PASSWORD: ${HELM_REPO_PASSWORD_DEV}
+    HELM_REPO_URL: ${HELM_REPO_URL_DEV}
+
+
+upload to prod:
+  extends: .upload
+  only:
+    - master
+  variables:
+    HELM_REPO_USERNAME: ${HELM_REPO_USERNAME_PROD}
+    HELM_REPO_PASSWORD: ${HELM_REPO_PASSWORD_PROD}
+    HELM_REPO_URL: ${HELM_REPO_URL_PROD}

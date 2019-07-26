@@ -1,0 +1,29 @@
+{{- if .Values.rbac.enabled }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ template "php-app.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+---
+kind: Role
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: {{ template "php-app.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+rules:
+{{ include "php-app.rbac-rules" . | indent 2 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ template "php-app.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ template "php-app.fullname" . }}
+subjects:
+- kind: ServiceAccount
+  name: {{ template "php-app.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+{{- end }}

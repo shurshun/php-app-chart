@@ -1,0 +1,43 @@
+{{- if or .Values.nginx.enabled .Values.php.enabled }}
+{{ if eq .Values.php.mode "php-fpm" }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "php-app.fullname" . }}
+  labels:
+    app.kubernetes.io/name: {{ include "php-app.name" . }}
+    helm.sh/chart: {{ include "php-app.chart" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+{{- if .Values.metrics.enabled }}
+{{ toYaml .Values.metrics.labels | indent 4 }}
+{{- end }}
+{{- range $name, $data := .Values.ports }}
+{{- if $data.labels }}
+{{ toYaml $data.labels | indent 4 }}
+{{- end }}
+{{- end }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+{{- range $name, $data := .Values.ports }}
+    - port: {{ $data.port }}
+      targetPort: {{ $name }}
+      name: {{ $name }}
+      protocol: {{ default "TCP" $data.protocol }}
+{{- end }}
+{{- if .Values.metrics.enabled }}
+    - name: php-metrics
+      protocol: TCP
+      port: 9112
+      targetPort: php-metrics
+    - name: nginx-metrics
+      protocol: TCP
+      port: 9113
+      targetPort: nginx-metrics
+{{- end }}
+  selector:
+    app.kubernetes.io/name: {{ include "php-app.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end }}
+{{- end }}

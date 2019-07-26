@@ -1,0 +1,19 @@
+{{- if and .Values.php.enabled (eq .Values.php.mode "php-fpm") }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "php-app.fullname" . }}-php
+  labels:
+    app.kubernetes.io/name: {{ include "php-app.name" . }}
+    helm.sh/chart: {{ include "php-app.chart" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    addonmanager.kubernetes.io/mode: Reconcile
+data:
+  PHP_MODE: {{ .Values.php.fpmMode | toString | quote }}
+  PHP_MAX_CHILDREN: {{ .Values.php.maxChildren | toString | quote }}
+  PHP_MIN_SERVERS: {{ .Values.php.minServers | toString | quote }}
+  PHP_MAX_SERVERS: {{ .Values.php.maxServers | toString | quote }}
+  PHP_MAX_REQUESTS: {{ .Values.php.maxRequests | toString | quote }}
+  PHP_IDLE_TIMEOUT: {{ .Values.php.idleTimeout | toString | quote }}
+{{- end }}

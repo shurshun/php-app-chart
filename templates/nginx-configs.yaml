@@ -1,0 +1,31 @@
+{{- if .Values.nginx.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "php-app.fullname" . }}-nginx
+  labels:
+    app.kubernetes.io/name: {{ include "php-app.name" . }}
+    helm.sh/chart: {{ include "php-app.chart" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    addonmanager.kubernetes.io/mode: Reconcile
+data:
+{{- if .Values.metrics.enabled }}
+  status.conf: |
+    server {
+      listen 8080 default_server;
+
+      access_log off;
+      error_log /dev/stderr crit;
+
+      location = /stub_status {
+        stub_status;
+      }
+
+      location /_healthz {
+        return 200 'OK';
+      }
+    }
+{{- end }}
+{{ include "php-app.nginx-configs" . | indent 2 }}
+{{- end }}

@@ -1,0 +1,111 @@
+{{- $fullName := include "php-app.fullname" . -}}
+{{- $name := include "php-app.name" . -}}
+{{- $chart := include "php-app.chart" . -}}
+{{- range $idx, $job := .Values.cronjobs }}
+apiVersion: batch/v1beta1
+kind: CronJob
+metadata:
+  name: {{ $fullName }}-{{ $job.name }}
+  labels:
+    app.kubernetes.io/name: {{ $name }}-{{ $job.name }}
+    helm.sh/chart: {{ $chart }}
+    app.kubernetes.io/instance: {{ $.Release.Name }}
+spec:
+  schedule: {{ $job.schedule | quote }}
+  concurrencyPolicy: {{ $job.concurrencyPolicy | default "Forbid" }}
+  successfulJobsHistoryLimit: {{ $job.successfulJobsHistoryLimit | default 3 }}
+  successfulJobsHistoryLimit: {{ $job.failedJobsHistoryLimit | default 3 }}
+  suspend: {{ $job.suspend | default false }}
+  startingDeadlineSeconds: {{ $job.startingDeadlineSeconds | default 60 }}
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: {{ $name }}-{{ $job.name }}
+            app.kubernetes.io/instance: {{ $.Release.Name }}
+          {{- with $.Values.podLabels}}
+{{ toYaml . | indent 12 }}
+          {{- end }}
+          annotations:
+          {{- with $.Values.podAnnotations}}
+{{ toYaml . | indent 12 }}
+          {{- end }}
+        spec:
+          restartPolicy: {{ $job.restartPolicy | default "OnFailure" }}
+          volumes:
+          {{- if $.Values.configs }}
+            - name: app-configs
+              secret:
+                secretName: {{ $fullName }}-configs
+          {{- end }}
+          {{- with $.Values.volumes }}
+{{ toYaml . | indent 12 }}
+          {{- end }}
+          containers:
+          - name: {{ $job.name }}
+          {{- if $job.image }}
+            image: "{{ default $.Values.image.repository $job.image.repository }}:{{ default $.Values.image.tag $job.image.repository }}"
+            imagePullPolicy: {{ default $.Values.image.pullPolicy $job.image.PullPolicy }}
+          {{- else }}
+            image: "{{ $.Values.image.repository }}:{{ $.Values.image.tag }}"
+            imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          {{- end }}
+            command:
+{{- if $job.command }}
+{{ toYaml $job.command | indent 14 }}
+{{- else }}
+              - docker-php-entrypoint
+{{- end }}
+{{- with $job.args }}
+            args:
+{{ toYaml . | indent 14 }}
+{{- end }}
+          {{- with $.Values.env.raw }}
+            env:
+  {{- range $key, $value := . }}
+              - name: {{ $key }}
+                value: {{ $value | toString | quote }}
+  {{- end }}
+          {{- end }}
+          {{- if or $.Values.env.secret $.Values.env.open }}
+            envFrom:
+            {{- if $.Values.env.secret }}
+              - secretRef:
+                  name: {{ $fullName }}
+            {{- end }}
+            {{- if $.Values.env.open }}
+              - configMapRef:
+                  name: {{ $fullName }}
+            {{- end }}
+          {{- end }}
+          {{- if or $.Values.configs $.Values.volumeMounts }}
+            volumeMounts:
+            {{- range $idx, $cfg := $.Values.configs }}
+              - name: app-configs
+                mountPath: {{ $cfg.path }}
+                subPath: {{ $cfg.name }}
+                readOnly: true
+            {{- end }}
+            {{- with $.Values.volumeMounts }}
+{{ toYaml . | indent 14 }}
+            {{- end }}
+          {{- end }}
+    {{- with $job.resources }}
+            resources:
+{{ toYaml . | indent 12 }}
+    {{- end }}
+    {{- with (default $.Values.nodeSelector $job.nodeSelector) }}
+          nodeSelector:
+{{ toYaml . | indent 12 }}
+    {{- end }}
+    {{- with (default $.Values.affinity $job.affinity) }}
+          affinity:
+{{ toYaml . | indent 12 }}
+    {{- end }}
+    {{- with (default $.Values.tolerations $job.tolerations) }}
+          tolerations:
+{{ toYaml . | indent 12 }}
+    {{- end }}
+---
+{{- end }}

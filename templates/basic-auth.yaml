@@ -1,0 +1,17 @@
+{{- if and .Values.auth.enabled .Values.auth.users }}
+{{- if .Values.nginx.enabled }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ include "php-app.fullname" . }}-auth
+  labels:
+    app.kubernetes.io/name: {{ include "php-app.name" . }}
+    helm.sh/chart: {{ include "php-app.chart" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    addonmanager.kubernetes.io/mode: Reconcile
+type: Opaque
+data:
+  auth: {{ include "php-app.basic-auth" . | b64enc | quote  }}
+{{- end }}
+{{- end }}

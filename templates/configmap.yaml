@@ -1,0 +1,20 @@
+{{- if .Values.env.open }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "php-app.fullname" . }}
+  labels:
+    app.kubernetes.io/name: {{ include "php-app.name" . }}
+    helm.sh/chart: {{ include "php-app.chart" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    addonmanager.kubernetes.io/mode: Reconcile
+data:
+{{- range $key, $value := .Values.env.open }}
+  {{ $key }}: {{ $value | toString | quote }}
+{{- end }}
+{{- end }}
+{{- if .Values.jobs.enabled }}
+  JOB_TMPL: {{ include "php-app.job-template" . | b64enc | quote }}
+  NAMESPACE: {{ .Release.Namespace }}
+{{- end }}

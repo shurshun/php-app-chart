@@ -1,0 +1,314 @@
+# Default values for laravel-app.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+replicaCount: 1
+
+image:
+  repository: nginx
+  tag: latest
+  pullPolicy: IfNotPresent
+
+nameOverride: ""
+fullnameOverride: ""
+
+service:
+  type: ClusterIP
+
+ports:
+  http:
+    port: 80
+    protocol: TCP
+
+# mapping routes with ports
+ingress:
+  enabled: false
+  rules:
+    http: /
+
+# php app type: symfony / laravel / simple
+#
+type: simple
+
+# enable cronjobs for project
+cronjobs: []
+  # - name: echo
+  #   command: "echo test"
+  #   spec: {}
+
+# creats JOB_TMPL variable with job template in base64
+jobs:
+  enabled: false
+
+# https://kubernetes.io/docs/concepts/workloads/pods/init-containers/
+initContainers: []
+  # - name: chown
+  #   command: "chown root:root /root"
+
+# additional containers in pod
+extraContainers: []
+  # - name: queue
+  #   command: "php artizan queue:work"
+
+# default settings
+default:
+  rbac:
+    rules:
+      - apiGroups: ["*"]
+        resources: ["*"]
+        verbs: ["*"]
+  symfony:
+    nginx:
+      configs:
+        app.conf: |-
+          server {
+            listen 80 default_server;
+
+            error_log /dev/stderr crit;
+            access_log /dev/stdout extended;
+
+            real_ip_header X-Forwarded-For;
+            real_ip_recursive on;
+            set_real_ip_from 0.0.0.0/0;
+
+            root /app/public;
+
+            location = /favicon.ico { access_log off; log_not_found off; }
+            location = /robots.txt { access_log off; log_not_found off; }
+
+            location /_healthz {
+              allow all;
+              access_log off;
+
+              add_header Content-Type text/plain;
+              return 200 'ok';
+            }
+
+            location / {
+              # try to serve file directly, fallback to index.php
+              try_files $uri /index.php$is_args$args;
+            }
+
+            location @rewriteapp {
+              rewrite ^(.*)$ /index.php/$1 last;
+            }
+
+            location ~ ^/index\.php(/|$) {
+              fastcgi_pass 127.0.0.1:9000;
+              fastcgi_split_path_info ^(.+\.php)(/.*)$;
+              include fastcgi_params;
+              fastcgi_param HTTPS off;
+              fastcgi_param SCRIPT_FILENAME $realpath_root$fastcgi_script_name;
+              fastcgi_param DOCUMENT_ROOT $realpath_root;
+              internal;
+            }
+
+            location ~ \.php$ {
+              return 404;
+            }
+          }
+    init:
+      command:
+        - /bin/sh
+        - -c
+        - >
+          mkdir -p \
+            /app/var/log && \
+          chown -R 3000:3000 /app/var
+      path: /app/var
+  laravel:
+    nginx:
+      configs:
+        app.conf: |-
+          server {
+            listen 80 default_server;
+
+            error_log /dev/stderr crit;
+            access_log /dev/stdout extended;
+
+            real_ip_header X-Forwarded-For;
+            real_ip_recursive on;
+            set_real_ip_from 0.0.0.0/0;
+
+            client_max_body_size 100m;
+
+            root /app/public;
+
+            index index.php;
+
+            location = /favicon.ico { access_log off; log_not_found off; }
+            location = /robots.txt { access_log off; log_not_found off; }
+
+            location /_healthz {
+              allow all;
+              access_log off;
+
+              add_header Content-Type text/plain;
+              return 200 'ok';
+            }
+
+            location ~ \.(js|css|png|jpg|jpeg|gif|swf|ico|pdf|mov|fla|zip|rar)$ {
+              expires 365d;
+            }
+
+            location = /index.htm {
+              try_files $uri $uri/ /index.php?$query_string;
+            }
+
+            location / {
+              try_files $uri $uri/ /index.php?$query_string;
+            }
+
+            location ~ ^/index\.php(/|$) {
+              fastcgi_pass 127.0.0.1:9000;
+              fastcgi_split_path_info ^(.+\.php)(/.*)$;
+              include fastcgi_params;
+              fastcgi_param HTTPS off;
+              fastcgi_param SCRIPT_FILENAME $realpath_root$fastcgi_script_name;
+              fastcgi_param DOCUMENT_ROOT $realpath_root;
+              fastcgi_hide_header X-Powered-By;
+              fastcgi_intercept_errors off;
+              fastcgi_buffer_size 16k;
+              fastcgi_buffers 4 16k;
+              fastcgi_keep_conn on;
+              internal;
+            }
+
+            location ~ \.php$ {
+              return 404;
+            }
+          }
+    init:
+      command:
+        - /bin/sh
+        - -c
+        - >
+          mkdir -p \
+            /app/bootstrap/cache \
+            /app/storage/logs \
+            /app/storage/debugbar \
+            /app/storage/app/public \
+            /app/storage/framework/cache \
+            /app/storage/framework/sessions \
+            /app/storage/framework/testing \
+            /app/storage/framework/views && \
+          chown -R 3000:3000 /app
+      path: /app
+
+# if app can't use env variables, you can define additional configs
+configs: []
+  # - name: parameters.yml
+  #   path: /app/app/config/parameters.yml
+  #   data: |
+  #     <...>
+
+# nginx configs for app if required
+nginx:
+  enabled: true
+  configs: {}
+
+# env variables: open - configmap, secret - secrets
+env:
+  open: {}
+    # LOG_LEVEL: debug
+  secret: {}
+    # MYSQL_DSN: 127.0.0.1:3306
+  raw: {}
+
+volumes: []
+#   - name: extras
+#     emptyDir: {}
+
+volumeMounts: []
+#   - name: extras
+#     mountPath: /usr/share/extras
+#     readOnly: true
+
+persistence:
+  enabled: false
+  # storageClass: "local-storage"
+  # accessMode: ReadWriteOnce
+  # size: 1Gi
+  # mountPath: "/data"
+
+livenessProbe:
+  httpGet:
+    path: /_healthz
+    port: http
+
+readinessProbe:
+  httpGet:
+    path: /_healthz
+    port: http
+
+# basic auth for nginx
+auth:
+  enabled: false
+  oauth: ""
+  users: {}
+
+# php-fpm settings
+php:
+  mode: php-fpm # php-fpm job
+  enabled: true
+  fpmMode: static
+  maxChildren: 5
+  minServers: 1
+  maxServers: 5
+  maxRequests: 128
+  idleTimeout: 10s
+
+metrics:
+  enabled: false
+  labels:
+    prometheus.io/php-scrape: "true"
+    prometheus.io/nginx-scrape: "true"
+  nginx:
+    image:
+      repository: nginx/nginx-prometheus-exporter
+      tag: "0.4.2"
+  php:
+    image:
+      repository: bakins/php-fpm-exporter
+      tag: v0.6.1
+
+podLabels: {}
+  # app.kubernetes.io/type: mysql
+
+podAnnotations: {}
+  # vault.security.banzaicloud.io/vault-addr: "http://vault.db:8200"
+  # vault.security.banzaicloud.io/vault-role: "test"
+  # vault.security.banzaicloud.io/vault-skip-verify: "true"
+  # vault.security.banzaicloud.io/vault-path: "kubernetes"
+
+persistence:
+  enabled: false
+  # storageClass: "local-storage"
+  # accessMode: ReadWriteOnce
+  # size: 1Gi
+
+resources: {}
+  # We usually recommend not to specify default resources and to leave this as a conscious
+  # choice for the user. This also increases chances charts run on environments with little
+  # resources, such as Minikube. If you do want to specify resources, uncomment the following
+  # lines, adjust them as necessary, and remove the curly braces after 'resources:'.
+  # limits:
+  #  cpu: 100m
+  #  memory: 128Mi
+  # requests:
+  #  cpu: 100m
+  #  memory: 128Mi
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+# create service account with specific access to run/list/etc jobs/pods in app namespace
+rbac:
+  enabled: false
+  rules: []
+    # - apiGroups: ["*"]
+    #   resources: ["*"]
+    #   verbs: ["*"]
